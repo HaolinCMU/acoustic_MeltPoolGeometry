@@ -14,6 +14,7 @@ import scipy.io
 import shutil
 import multiprocessing
 import sklearn.cluster as skc
+import sklearn.metrics as skm
 
 from sklearn import manifold
 from mpl_toolkits import mplot3d
@@ -22,6 +23,10 @@ from matplotlib.ticker import NullFormatter
 """
 Result post-analysis. 
 """
+
+
+DEBUG = True
+
 
 class DBSCAN():
     """
@@ -418,22 +423,22 @@ def raw_visualization_plot(data, label_array, n_features, figure_name="raw_visua
 def evaluateClusterGoodness(data, label_array):
     """
     """
-
-    silhouette_avg = skc.silhouette_score(data, label_array)
-    sample_silhouette_values = skc.silhouette_samples(data, label_array)
+        
+    silhouette_avg = skm.silhouette_score(data, label_array)
+    sample_silhouette_values = skm.silhouette_samples(data, label_array)
 
     return silhouette_avg, sample_silhouette_values
 
 
-def clusterGoodness_Visualization(data, label_array, center_array, n_clusters, silhouette_avg, 
-                                  sample_silhouette_values):
+def clusterGoodness_Visualization(data, label_array, center_array, n_clusters,
+                                  figure_name="cluster_goodness_eval_visualization.png"):
     """
     """
 
     fig, (ax1, ax2) = plt.subplots(1, 2)
-    fig.set_size_inches(18, 7)
+    fig.set_size_inches(72, 28)
     ax1.set_xlim([-0.1, 1])
-    ax1.set_ylim([0, len(data) + (n_clusters + 1) * 10])
+    ax1.set_ylim([0, data.shape[0] + (n_clusters + 1) * 10])
 
     silhouette_avg, sample_silhouette_values = evaluateClusterGoodness(data, label_array)
 
@@ -473,7 +478,7 @@ def clusterGoodness_Visualization(data, label_array, center_array, n_clusters, s
 
     # Draw white circles at cluster centers
     ax2.scatter(center_array[:, 0], center_array[:, 1], marker='o',
-                c="white", alpha=1, s=200, edgecolor='k')
+                c="white", alpha=1, s=500, edgecolor='k')
 
     for i, c in enumerate(center_array):
         ax2.scatter(c[0], c[1], marker='$%d$' % i, alpha=1,
@@ -485,7 +490,29 @@ def clusterGoodness_Visualization(data, label_array, center_array, n_clusters, s
 
     plt.suptitle(("Silhouette analysis for KMeans clustering on sample data "
                   "with n_clusters = %d" % n_clusters),
-                  fontsize=14, fontweight='bold')
+                  fontsize=40, fontweight='bold')
+    plt.savefig(figure_name)
+    
+    return silhouette_avg
+
+
+def kmeans_ClusterNum_parametric_study(data, kmeans_n_clusters_list):
+    """
+    """
+    
+    silhouette_avg_list = []
+    for kmeans_n_clusters_temp in kmeans_n_clusters_list:
+        kmeans = clustering(data, method="KMEANS", n_clusters=kmeans_n_clusters_temp)
+        label_array = kmeans.labels_
+        center_array = kmeans.cluster_centers_
+        
+        silhouette_avg_temp = clusterGoodness_Visualization(data.T, label_array, center_array, kmeans_n_clusters_temp, 
+                                                            figure_name="cluster_goodness_eval_visualization_{}.png".format(kmeans_n_clusters_temp))
+        silhouette_avg_list.append(silhouette_avg_temp)
+        
+        print("Cluster Number: {} | Evaluation Score: {}".format(kmeans_n_clusters_temp, silhouette_avg_temp))
+    
+    return silhouette_avg_list
 
 
 if __name__ == "__main__":
@@ -505,8 +532,8 @@ if __name__ == "__main__":
     isVisualize = True
     visualization_space_dimensions = 2 # 2 or 3.
     
-    features_PCA_ind_list = [2] # [2].
-    features_Hu_ind_list = [0,1] # [], [0,1], [0,1,2,3], [0,1,2,3,4,5,6].
+    features_PCA_ind_list = [2,3] # [2].
+    features_Hu_ind_list = [] # [], [0,1], [0,1,2,3], [0,1,2,3,4,5,6].
     
     
     # ===================== Data modification, normalization & standardization ===================== # 
@@ -556,9 +583,31 @@ if __name__ == "__main__":
     object_array_stack = getObjectArray(image_PCA_invariants_array_stack, 
                                         image_Hu_invariants_array_stack, 
                                         features_PCA_ind_list, features_Hu_ind_list)
-
-
+    
+    
+    # ===================== K-Means parametric study ===================== #
+    if clustering_method == "KMEANS":
+        kmeans_n_clusters_range = (3, 20) # Inclusive at both ends. 
+        kmeans_n_clusters_list = list(np.arange(kmeans_n_clusters_range[0],
+                                                kmeans_n_clusters_range[1]+1))
+        silhouette_avg_list = kmeans_ClusterNum_parametric_study(object_array_stack, 
+                                                                 kmeans_n_clusters_list)
+        
+        plt.figure(figsize=(20,20))
+        plt.rcParams.update({"font.size": 35})
+        plt.tick_params(labelsize=35)
+        plt.plot(kmeans_n_clusters_list, silhouette_avg_list, c='b', linewidth=3.0, 
+                 marker='v', markersize=15.0, label="Silhouette_score")
+        plt.xlim(kmeans_n_clusters_range)
+        plt.xlabel("Number of clusters", fontsize=40)
+        plt.ylabel("Silhouette score", fontsize=40)
+        plt.legend(loc="upper right", prop={"size": 40})
+        plt.savefig("nClusters_vs_Silhouette_plot.png")
+    
+    
     # ===================== Clustering ===================== #
+    kmeans_n_clusters = kmeans_n_clusters_list[silhouette_avg_list.index(max(silhouette_avg_list))]
+    
     if clustering_method == "DBSCAN": 
         dbscan = clustering(object_array_stack, clustering_method, 
                             file_paths_list=file_paths_list)
@@ -586,6 +635,11 @@ if __name__ == "__main__":
         tSNE_plot(object_array_stack.T, label_array, n_components=visualization_space_dimensions) # t-SNE visualization of high-dimensional data. 
         PCA_visualization_plot(object_array_stack, label_array, n_components=visualization_space_dimensions) # PCA visualization of high-dimensional data.
         raw_visualization_plot(object_array_stack, label_array, n_features=visualization_space_dimensions) # Raw visualization of object feature array. 
+    
+        
+    # ===================== Evaluate clustering goodness ===================== #
+    silhouette_avg = clusterGoodness_Visualization(object_array_stack.T, label_array, 
+                                                   center_array, kmeans_n_clusters)
         
     
     # ===================== Remove previous files =====================#
@@ -610,7 +664,7 @@ if __name__ == "__main__":
         
         shutil.copy(image_path, os.path.join(cluster_path, "{}.png".format(file_name)))
         
-        print("File: {}.png categorized.".format(file_name))
+        # print("File: {}.png categorized.".format(file_name))
     
     
     # ===================== K-Means parametric study ===================== #
